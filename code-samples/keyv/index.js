@@ -1,45 +1,52 @@
-const Keyv = require('keyv');
-const { Client, Events, GatewayIntentBits } = require('discord.js');
-const { globalPrefix, token } = require('./config.json');
+const fs = require('node:fs');
+const path = require('node:path');
+const { Client, Collection, GatewayIntentBits, Partials } = require('discord.js');
+const { token } = require('./config.json');
+const prefix = '!';
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-const prefixes = new Keyv('sqlite://path/to.sqlite');
+const client = new Client({
+    intents: [
+      GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
+    partials: [Partials.Channel],
+  });
 
-client.once(Events.ClientReady, readyClient => {
-	console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-});
+  client.commands = new Collection();
 
-client.on(Events.MessageCreate, async message => {
-	if (message.author.bot) return;
+  // 명령어 로드
+  const foldersPath = path.join(__dirname, 'commands');
+  const commandFolders = fs.readdirSync(foldersPath);
 
-	let args;
-	if (message.guild) {
-		let prefix;
+  for (const folder of commandFolders) {
+    const commandsPath = path.join(foldersPath, folder);
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    for (const file of commandFiles) {
+      const filePath = path.join(commandsPath, file);
+      const command = require(filePath);
+      client.commands.set(command.name, command);
+    }
+}
+console.log(client.commands.map(c => c.name).join(', ') + ' 명령어가 로드됨.');
 
-		if (message.content.startsWith(globalPrefix)) {
-			prefix = globalPrefix;
-		} else {
-			const guildPrefix = await prefixes.get(message.guild.id);
-			if (message.content.startsWith(guildPrefix)) prefix = guildPrefix;
-		}
+// 준비
+client.on('ready', () => console.log(`${client.user.tag} 에 로그인됨`));
 
-		if (!prefix) return;
-		args = message.content.slice(prefix.length).trim().split(/\s+/);
-	} else {
-		const slice = message.content.startsWith(globalPrefix) ? globalPrefix.length : 0;
-		args = message.content.slice(slice).split(/\s+/);
-	}
+// 메세지 
+client.on('messageCreate', msg => {
+    console.log("client mgs => " + msg.content)
 
-	const command = args.shift().toLowerCase();
+    if (msg.author.bot) return;
+    if (!msg.content.startsWith(prefix)) return;
+    if (msg.content.slice(0, prefix.length) !== prefix) return;
 
-	if (command === 'prefix') {
-		if (args.length) {
-			await prefixes.set(message.guild.id, args[0]);
-			return message.channel.send(`Successfully set prefix to \`${args[0]}\``);
-		}
+    const args = msg.content.slice(prefix.length).trim().split(/ +/g);
+    const command = args.shift().toLowerCase();
 
-		return message.channel.send(`Prefix is \`${await prefixes.get(message.guild.id) || globalPrefix}\``);
-	}
-});
+    let cmd = client.commands.get(command);
+    if (cmd) cmd.run(client, msg, args);
+})
 
 client.login(token);
